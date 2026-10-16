@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide des méthodes</title>
+<style>
+  :root { --bg:#fbfaf7; --fg:#1f2328; --muted:#5b6370; --accent:#2f5d9e; --card:#ffffff; --line:#e3e0d8; --code:#f2f0ea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16181c; --fg:#e6e6e6; --muted:#9aa3ad; --accent:#7fa8e0; --card:#1e2126; --line:#2e333a; --code:#262a30; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 80px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; }
+  h2 { margin-top: 48px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 1.35rem; }
+  h3 { font-size: 1.05rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); margin-top: 0; }
+  nav ol { columns: 2; padding-left: 20px; }
+  nav a, a { color: var(--accent); }
+  code, pre { font-family: ui-monospace, Consolas, monospace; font-size: .9em; background: var(--code); border-radius: 4px; }
+  code { padding: 1px 4px; }
+  pre { padding: 12px; overflow-x: auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 4px 16px 12px; margin: 16px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  .scroll { overflow-x: auto; }
+  th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .formula { text-align: center; font-family: "Cambria Math", Georgia, serif; font-size: 1.05rem; margin: 12px 0; }
+  @media (max-width: 600px) { nav ol { columns: 1; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Guide des méthodes</h1>
+<p class="sub">Prédiction génétique à partir de 100 SNPs, de la régression linéaire au deep learning, en R</p>
+
+<nav class="card">
+<h3>Sommaire</h3>
+<ol>
+  <li><a href="#donnees">Les données</a></li>
+  <li><a href="#eval">Évaluer un modèle</a></li>
+  <li><a href="#lm">Régression linéaire</a></li>
+  <li><a href="#glm">GLM et régression logistique</a></li>
+  <li><a href="#pen">Ridge, Lasso, ElasticNet</a></li>
+  <li><a href="#rf">Random Forest</a></li>
+  <li><a href="#xgb">XGBoost</a></li>
+  <li><a href="#dl">Réseaux de neurones</a></li>
+  <li><a href="#synthese">Synthèse comparative</a></li>
+</ol>
+</nav>
+
+<h2 id="donnees">1. Les données</h2>
+<p>2000 individus simulés et 100 SNPs. Chaque génotype est codé <code>0/1/2</code>, soit le nombre de copies de l'allèle à risque. Parmi les SNPs, 48 sont des <em>candidats</em> (identifiants rs réels) et 52 sont du bruit de fond (<code>rs_bg…</code>).</p>
+<div class="scroll"><table>
+<tr><th>Fichier</th><th>Contenu</th><th>Dimensions</th></tr>
+<tr><td><code>data_complet.csv</code></td><td>ID + 100 SNPs + <code>true_prs</code> + <code>phenotype</code></td><td>2000 × 103</td></tr>
+<tr><td><code>snp_info_top100.csv</code></td><td>résumé GWAS : SNP, chromosome, position, allèles A1/A2, BETA (log-OR), SE, p-value</td><td>100 × 8</td></tr>
+<tr><td><code>genotypes_top100.csv</code></td><td>ID + génotypes</td><td>2000 × 101</td></tr>
+<tr><td><code>true_prs.csv</code></td><td>score polygénique continu</td><td>2000 × 2</td></tr>
+<tr><td><code>phenotype.csv</code></td><td>statut malade (1) ou sain (0) : 500 cas, 1500 témoins</td><td>2000 × 2</td></tr>
+</table></div>
+<p>Tous les exercices utilisent le <strong>même découpage</strong> : <code>set.seed(42)</code>, 70 % pour l'entraînement et 30 % pour le test. Les résultats sont donc directement comparables d'un exercice à l'autre.</p>
+
+<h2 id="eval">2. Évaluer un modèle</h2>
+<ul>
+  <li><strong>Train / validation / test.</strong> Le modèle apprend sur le train. Les hyperparamètres se règlent sur une validation, ou par validation croisée. Le test ne sert qu'<em>une seule fois</em>, à la fin.</li>
+  <li><strong>Surajustement.</strong> Il se repère à un écart important entre la performance train et la performance test.</li>
+  <li><strong>Régression :</strong> RMSE = √moyenne((y − ŷ)²) ; R² = 1 − SCR/SCT.</li>
+  <li><strong>Classification :</strong> avec 25 % de cas, un modèle qui prédit toujours « sain » atteint 75 % d'accuracy. On utilise donc l'<strong>AUC</strong>, c'est-à-dire la probabilité qu'un cas tiré au hasard reçoive un score plus élevé qu'un témoin tiré au hasard. Elle ne dépend pas du seuil : 0,5 correspond au hasard, 1 à une séparation parfaite.</li>
+  <li><strong>Fuite d'information :</strong> sélectionner des SNPs, standardiser ou régler des hyperparamètres en utilisant le test rend la performance mesurée trop optimiste.</li>
+</ul>
+
+<h2 id="lm">3. Régression linéaire (OLS) <small>— ex. 01</small></h2>
+<p class="formula">y = β₀ + β₁·SNP₁ + … + β<sub>p</sub>·SNP<sub>p</sub> + ε,&nbsp;&nbsp; ε ~ N(0, σ²)</p>
+<p>Les β sont choisis pour minimiser la somme des carrés des résidus. Sous le codage additif, β<sub>j</sub> est la variation moyenne de y pour chaque allèle supplémentaire.</p>
+<p><strong>Hypothèses :</strong> linéarité, indépendance, homoscédasticité et normalité des résidus. <strong>Limites :</strong> instable quand p est proche de n et ne sélectionne pas de variables.</p>
+<pre>m &lt;- lm(true_prs ~ ., data = train[, c(snps, "true_prs")])
+summary(m); predict(m, test)</pre>
+
+<h2 id="glm">4. GLM et régression logistique <small>— ex. 02</small></h2>
+<p>Un GLM associe une <em>loi</em> pour Y et une <em>fonction de lien</em> g telle que g(E[Y]) = Xβ. Avec la loi gaussienne et le lien identité, on retrouve l'OLS. Avec la loi binomiale et le lien logit, on obtient la régression logistique :</p>
+<p class="formula">log( p / (1 − p) ) = β₀ + Σ β<sub>j</sub>·SNP<sub>j</sub></p>
+<p>exp(β<sub>j</sub>) est l'<strong>odds ratio</strong> par allèle. Les coefficients sont estimés par maximum de vraisemblance.</p>
+<pre>m &lt;- glm(phenotype ~ ., data = train_df, family = binomial)
+p &lt;- predict(m, test, type = "response")
+pROC::auc(pROC::roc(test$phenotype, p))</pre>
+
+<h2 id="pen">5. Ridge, Lasso, ElasticNet <small>— ex. 03</small></h2>
+<p>On ajoute une pénalité sur la taille des coefficients pour réduire la variance du modèle, au prix d'un peu de biais :</p>
+<p class="formula">min<sub>β</sub> &nbsp; −logL(β) + λ · [ (1−α)/2 · ‖β‖²₂ + α · ‖β‖₁ ]</p>
+<div class="scroll"><table>
+<tr><th></th><th>α</th><th>Effet</th><th>Quand l'utiliser</th></tr>
+<tr><td>Ridge</td><td>0</td><td>réduit tous les β vers 0, sans les annuler</td><td>nombreux petits effets, SNPs corrélés</td></tr>
+<tr><td>Lasso</td><td>1</td><td>met des β exactement à 0 et sélectionne donc des variables</td><td>peu de vrais effets (modèle parcimonieux)</td></tr>
+<tr><td>ElasticNet</td><td>0 &lt; α &lt; 1</td><td>compromis : sélection, et groupes de variables corrélées conservés ensemble</td><td>SNPs en déséquilibre de liaison</td></tr>
+</table></div>
+<p>λ se choisit par validation croisée. <code>lambda.1se</code> donne le modèle le plus simple dont l'erreur reste à moins d'un écart-type du minimum ; il est souvent plus robuste que <code>lambda.min</code>. Les variables sont standardisées automatiquement par <code>glmnet</code>.</p>
+<pre>cv &lt;- glmnet::cv.glmnet(X, y, family = "binomial", alpha = 1, type.measure = "auc")
+coef(cv, s = "lambda.1se")</pre>
+
+<h2 id="rf">6. Random Forest <small>— ex. 04</small></h2>
+<p>Un arbre de décision découpe récursivement l'espace des données. Il est très flexible mais aussi très variable. Une forêt fait la <strong>moyenne de nombreux arbres</strong>, chacun appris sur :</p>
+<ul>
+  <li>un échantillon bootstrap des individus (bagging) ;</li>
+  <li>à chaque nœud, un tirage de <code>mtry</code> variables seulement (par défaut √p), ce qui <em>décorrèle</em> les arbres.</li>
+</ul>
+<p>Les individus absents d'un bootstrap (≈ 37 %) fournissent l'erreur <strong>OOB</strong>, une estimation de l'erreur de test qui ne demande aucun jeu de validation. Ajouter des arbres ne cause pas de surajustement : la performance se stabilise. L'<strong>importance par permutation</strong> mesure la perte de performance quand on mélange les valeurs d'une variable.</p>
+<p><strong>Points forts :</strong> interactions et non-linéarités, peu de réglages. <strong>Limite :</strong> moins efficace qu'un modèle linéaire quand le vrai signal est additif, car l'arbre doit approcher une pente par des marches d'escalier.</p>
+<pre>rf &lt;- ranger::ranger(phenotype ~ ., data = train_c, num.trees = 500,
+                     probability = TRUE, importance = "permutation")</pre>
+
+<h2 id="xgb">7. XGBoost — gradient boosting <small>— ex. 05</small></h2>
+<p>Le boosting construit les arbres <strong>séquentiellement</strong> : chaque nouvel arbre, peu profond, corrige les erreurs (le gradient de la perte) des arbres précédents.</p>
+<p class="formula">F<sub>m</sub>(x) = F<sub>m−1</sub>(x) + η · f<sub>m</sub>(x)</p>
+<div class="scroll"><table>
+<tr><th>Hyperparamètre</th><th>Rôle</th></tr>
+<tr><td><code>eta</code></td><td>learning rate : plus il est petit, plus il faut d'arbres, et meilleure est en général la généralisation</td></tr>
+<tr><td><code>max_depth</code></td><td>profondeur des arbres. 1 = souches, donc modèle additif ; 2 et plus = interactions</td></tr>
+<tr><td><code>subsample</code>, <code>colsample_bytree</code></td><td>sous-échantillonnage aléatoire des individus et des variables</td></tr>
+<tr><td><code>lambda</code>, <code>alpha</code></td><td>pénalités L2 et L1 sur les poids des feuilles</td></tr>
+</table></div>
+<p>Contrairement à la forêt, le boosting <strong>surajuste</strong> si l'on ajoute trop d'arbres. L'<strong>early stopping</strong> arrête l'apprentissage quand la métrique de validation ne progresse plus depuis N itérations. Importance : <em>Gain</em> = amélioration de la perte apportée par la variable ; <em>Cover</em> = nombre d'observations concernées ; <em>Frequency</em> = nombre de splits.</p>
+<pre>xgb.train(params, dtrain, nrounds = 1000, evals = list(val = dval),
+          early_stopping_rounds = 50)</pre>
+
+<h2 id="dl">8. Réseaux de neurones (MLP) <small>— ex. 06</small></h2>
+<p>Un perceptron multicouche enchaîne des transformations linéaires et des fonctions d'activation non linéaires (ReLU, sigmoïde) :</p>
+<p class="formula">h = σ(W₁x + b₁) &nbsp;→&nbsp; ŷ = sigmoïde(W₂h + b₂)</p>
+<p>Les poids sont appris par descente de gradient (rétropropagation). Le nombre de paramètres augmente vite : 100 entrées et 5 neurones cachés donnent déjà 511 poids. Avec 2000 individus, la <strong>régularisation est indispensable</strong> :</p>
+<ul>
+  <li><strong>weight decay</strong> (pénalité L2 sur les poids, l'équivalent du Ridge) ;</li>
+  <li><strong>dropout</strong> : des neurones sont désactivés au hasard pendant l'entraînement ;</li>
+  <li><strong>early stopping</strong> sur une validation.</li>
+</ul>
+<p>Il faut <strong>standardiser</strong> les entrées avec la moyenne et l'écart-type calculés sur le train. Les réseaux profonds montrent leur intérêt sur des données très nombreuses et structurées (images, séquences), rarement sur 100 SNPs tabulaires.</p>
+
+<h2 id="synthese">9. Synthèse comparative</h2>
+<div class="scroll"><table>
+<tr><th>Méthode</th><th>Non-linéarité</th><th>Sélection</th><th>Interprétabilité</th><th>Réglages clés</th></tr>
+<tr><td>LM / GLM</td><td>non</td><td>non</td><td>excellente (β, OR)</td><td>aucun</td></tr>
+<tr><td>Ridge</td><td>non</td><td>non</td><td>bonne</td><td>λ</td></tr>
+<tr><td>Lasso / ENet</td><td>non</td><td>oui</td><td>très bonne</td><td>λ, α</td></tr>
+<tr><td>Random Forest</td><td>oui</td><td>importance</td><td>moyenne</td><td>mtry, min.node.size</td></tr>
+<tr><td>XGBoost</td><td>oui</td><td>importance</td><td>moyenne</td><td>eta, max_depth, nrounds</td></tr>
+<tr><td>MLP</td><td>oui</td><td>non</td><td>faible</td><td>architecture, decay, dropout</td></tr>
+</table></div>
+<p><strong>Message principal :</strong> sur ces données, le PRS est une somme <em>additive</em> d'effets de SNPs. Les modèles linéaires, pénalisés ou non, sont donc déjà proches de la borne fixée par le vrai PRS (AUC ≈ 0,82). Les modèles complexes apportent peu, voire perdent en performance. Il vaut mieux choisir le modèle le plus simple qui atteint la performance cible.</p>
+</main>
+</body>
+</html>
